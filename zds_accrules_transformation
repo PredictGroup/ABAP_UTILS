@@ -1,0 +1,706 @@
+
+PROGRAM trans_routine.
+
+
+*---------------------------------------------------------------------*
+*       CLASS routine DEFINITION
+*---------------------------------------------------------------------*
+*
+*---------------------------------------------------------------------*
+CLASS lcl_transform DEFINITION.
+  PUBLIC SECTION.
+
+*  Attributs
+    DATA:
+      p_check_master_data_exist
+            TYPE RSODSOCHECKONLY READ-ONLY,
+*-    Instance for getting request runtime attributs;
+*     Available information: Refer to methods of
+*     interface 'if_rsbk_request_admintab_view'
+      p_r_request
+            TYPE REF TO if_rsbk_request_admintab_view READ-ONLY.
+
+  PRIVATE SECTION.
+
+    TYPE-POOLS: rsd, rstr.
+
+*   Rule specific types
+    TYPES:
+      BEGIN OF _ty_s_TG_1,
+*      Field: RECORD.
+        RECORD           TYPE RSARECORD,
+*      InfoObject: 0CO_AREA Контроллинговая единица.
+        CO_AREA           TYPE /BI0/OICO_AREA,
+*      InfoObject: 0SEM_POSIT Позиция технологической карты.
+        SEM_POSIT           TYPE /BI0/OISEM_POSIT,
+*      InfoObject: 0COSTELMNT Вид затрат.
+        COSTELMNT           TYPE /BI0/OICOSTELMNT,
+*      InfoObject: ZCSTELMNT Вид затрат BPC (правила).
+        /BIC/ZCSTELMNT           TYPE /BIC/OIZCSTELMNT,
+*      InfoObject: ZCSTCNTP1 МВЗ для правил 1.
+        /BIC/ZCSTCNTP1           TYPE /BIC/OIZCSTCNTP1,
+*      InfoObject: ZCSTCNTP2 МВЗ для правил 2.
+        /BIC/ZCSTCNTP2           TYPE /BIC/OIZCSTCNTP2,
+*      InfoObject: 0RECORDMODE BW: дельта-метод: режим обновления.
+        RECORDMODE           TYPE RODMUPDMOD,
+*      InfoObject: ZACC1BPC Счет BPC 1й блок.
+        /BIC/ZACC1BPC           TYPE /BIC/OIZACC1BPC,
+*      InfoObject: ZACC2BPC Счет BPC 2й блок.
+        /BIC/ZACC2BPC           TYPE /BIC/OIZACC2BPC,
+*      InfoObject: ZACC3BPC Счет BPC 3й блок.
+        /BIC/ZACC3BPC           TYPE /BIC/OIZACC3BPC,
+*      InfoObject: ZACC1ERP Счет ERP 1й блок.
+        /BIC/ZACC1ERP           TYPE /BIC/OIZACC1ERP,
+*      InfoObject: ZACC2ERP Счет ERP 2й блок.
+        /BIC/ZACC2ERP           TYPE /BIC/OIZACC2ERP,
+*      InfoObject: ZACC3ERP Счет ERP 3й блок.
+        /BIC/ZACC3ERP           TYPE /BIC/OIZACC3ERP,
+*      InfoObject: ZCSTC1ERP МВЗ 1й блок ERP.
+        /BIC/ZCSTC1ERP           TYPE /BIC/OIZCSTC1ERP,
+*      InfoObject: ZCSTC2ERP МВЗ 2й блок ERP.
+        /BIC/ZCSTC2ERP           TYPE /BIC/OIZCSTC2ERP,
+*      InfoObject: ZCSTC1BPC МВЗ 1й блок BPC.
+        /BIC/ZCSTC1BPC           TYPE /BIC/OIZCSTC1BPC,
+*      InfoObject: ZCSTC2BPC МВЗ 2й блок BPC.
+        /BIC/ZCSTC2BPC           TYPE /BIC/OIZCSTC2BPC,
+*      InfoObject: ZCHN1_FLG Основная загрузка.
+        /BIC/ZCHN1_FLG           TYPE /BIC/OIZCHN1_FLG,
+*      InfoObject: ZCHN2_FLG Дополнительная загрузка.
+        /BIC/ZCHN2_FLG           TYPE /BIC/OIZCHN2_FLG,
+*      InfoObject: ZCHN3_FLG Амортизация (загрузка).
+        /BIC/ZCHN3_FLG           TYPE /BIC/OIZCHN3_FLG,
+      END   OF _ty_s_TG_1.
+    TYPES:
+      _ty_t_TG_1        TYPE STANDARD TABLE OF _ty_s_TG_1
+                        WITH NON-UNIQUE DEFAULT KEY.
+
+*$*$ begin of global - insert your declaration only below this line  *-*
+... "insert your code here
+*$*$ end of global - insert your declaration only before this line   *-*
+    METHODS
+      new_record__end_routine
+        IMPORTING
+          source_segid             type rstran_segid
+          source_record            type sytabix
+        EXPORTING
+          record_new               type sytabix.
+
+    METHODS
+      end_routine
+        IMPORTING
+          request                  type rsrequest
+          datapackid               type rsdatapid
+          segid                    type rsbk_segid
+        EXPORTING
+          monitor                  type rstr_ty_t_monitors
+        CHANGING
+          RESULT_PACKAGE              type _ty_t_TG_1
+        RAISING
+          cx_rsrout_abort
+          cx_rsbk_errorcount.
+    METHODS
+      inverse_end_routine
+        IMPORTING
+          i_th_fields_outbound         TYPE rstran_t_field_inv
+          I_R_SELSET_OUTBOUND          TYPE REF TO CL_RSMDS_SET
+          i_is_main_selection          TYPE rs_bool
+          i_r_selset_outbound_complete TYPE REF TO cl_rsmds_set
+          i_r_universe_inbound         TYPE REF TO CL_RSMDS_UNIVERSE
+        CHANGING
+          c_th_fields_inbound          TYPE rstran_t_field_inv
+          c_r_selset_inbound           TYPE REF TO CL_RSMDS_SET
+          c_exact                      TYPE rs_bool.
+ENDCLASS.                    "routine DEFINITION
+
+*$*$ begin of 2nd part global - insert your code only below this line  *
+... "insert your code here
+*$*$ end of 2nd part global - insert your code only before this line   *
+
+*---------------------------------------------------------------------*
+*       CLASS routine IMPLEMENTATION
+*---------------------------------------------------------------------*
+*
+*---------------------------------------------------------------------*
+CLASS lcl_transform IMPLEMENTATION.
+
+*----------------------------------------------------------------------*
+*       Method end_routine
+*----------------------------------------------------------------------*
+*       Calculation of result package via end routine.
+*       Note: Update of target fields depends on rule assignment in
+*       transformation editor. Only fields that have a rule assigned,
+*       are updated to the data target.
+*----------------------------------------------------------------------*
+*   <-> result package
+*----------------------------------------------------------------------*
+  METHOD end_routine.
+*=== Segments ===
+
+    FIELD-SYMBOLS:
+      <RESULT_FIELDS>    TYPE _ty_s_TG_1.
+
+    DATA:
+      MONITOR_REC     TYPE rstmonitor.
+
+*$*$ begin of routine - insert your code only below this line        *-*
+... "insert your code here
+*--  fill table "MONITOR" with values of structure "MONITOR_REC"
+*-   to make monitor entries
+... "to cancel the update process
+*    raise exception type CX_RSROUT_ABORT.
+
+    FIELD-SYMBOLS:
+      <RESULT_FIELDS_1>    TYPE _ty_s_TG_1,
+      <RESULT_FIELDS_2>    TYPE _ty_s_TG_1,
+      <RESULT_FIELDS_3>    TYPE _ty_s_TG_1,
+      <RESULT_FIELDS_4>    TYPE _ty_s_TG_1,
+      <RESULT_FIELDS_5>    TYPE _ty_s_TG_1,
+      <RESULT_FIELDS_6>    TYPE _ty_s_TG_1,
+      <RESULT_FIELDS_7>    TYPE _ty_s_TG_1,
+      <RESULT_FIELDS_8>    TYPE _ty_s_TG_1,
+
+      <RESULT_FIELDS_9>    TYPE _ty_s_TG_1,
+      <RESULT_FIELDS_10>    TYPE _ty_s_TG_1,
+      <RESULT_FIELDS_11>    TYPE _ty_s_TG_1,
+      <RESULT_FIELDS_12>    TYPE _ty_s_TG_1,
+      <RESULT_FIELDS_13>    TYPE _ty_s_TG_1,
+      <RESULT_FIELDS_14>    TYPE _ty_s_TG_1,
+      <RESULT_FIELDS_15>    TYPE _ty_s_TG_1,
+      <RESULT_FIELDS_16>    TYPE _ty_s_TG_1.
+
+    FIELD-SYMBOLS:
+      <RESULT_FIELDS_9_2>    TYPE _ty_s_TG_1.
+
+    DATA: LT_RESULT_1 TYPE _ty_T_TG_1,
+          LT_RESULT_2 TYPE _ty_T_TG_1,
+          LT_RESULT_3 TYPE _ty_T_TG_1,
+          LT_RESULT_4 TYPE _ty_T_TG_1,
+          LS_RESULT_1 TYPE _ty_S_TG_1,
+          LS_RESULT_2 TYPE _ty_S_TG_1,
+          LS_RESULT_3 TYPE _ty_S_TG_1,
+          LS_RESULT_4 TYPE _ty_S_TG_1,
+
+          LT_RESULT_5 TYPE _ty_T_TG_1,
+          LT_RESULT_6 TYPE _ty_T_TG_1,
+          LT_RESULT_7 TYPE _ty_T_TG_1,
+          LT_RESULT_8 TYPE _ty_T_TG_1,
+          LS_RESULT_5 TYPE _ty_S_TG_1,
+          LS_RESULT_6 TYPE _ty_S_TG_1,
+          LS_RESULT_7 TYPE _ty_S_TG_1,
+          LS_RESULT_8 TYPE _ty_S_TG_1,
+
+          LT_RESULT_9 TYPE _ty_T_TG_1,
+          LT_RESULT_10 TYPE _ty_T_TG_1,
+          LT_RESULT_11 TYPE _ty_T_TG_1,
+          LT_RESULT_12 TYPE _ty_T_TG_1,
+          LS_RESULT_9 TYPE _ty_S_TG_1,
+          LS_RESULT_10 TYPE _ty_S_TG_1,
+          LS_RESULT_11 TYPE _ty_S_TG_1,
+          LS_RESULT_12 TYPE _ty_S_TG_1,
+
+          LT_RESULT_13 TYPE _ty_T_TG_1,
+          LT_RESULT_14 TYPE _ty_T_TG_1,
+          LT_RESULT_15 TYPE _ty_T_TG_1,
+          LT_RESULT_16 TYPE _ty_T_TG_1,
+          LS_RESULT_13 TYPE _ty_S_TG_1,
+          LS_RESULT_14 TYPE _ty_S_TG_1,
+          LS_RESULT_15 TYPE _ty_S_TG_1,
+          LS_RESULT_16 TYPE _ty_S_TG_1.
+
+    DATA: LT_RESULT_9_2 TYPE _ty_T_TG_1,
+          LS_RESULT_9_2 TYPE _ty_S_TG_1.
+
+    DATA: idx TYPE integer,
+          idxC TYPE C.
+
+    DATA: theXflag TYPE C.
+
+    theXflag = ''.
+
+    BREAK-POINT.
+
+    LOOP AT RESULT_PACKAGE ASSIGNING <RESULT_FIELDS_1>.
+
+* ERP 1
+
+      CLEAR LT_RESULT_1.
+      MOVE-CORRESPONDING <RESULT_FIELDS_1> TO LS_RESULT_1.
+      LS_RESULT_1-RECORD = ''.
+
+      IF LS_RESULT_1-/BIC/ZCSTC1ERP(1) = 'X'.
+        idx = 0.
+        WHILE idx <= 9.
+          MOVE idx to idxC.
+          CONCATENATE idxC LS_RESULT_1-/BIC/ZCSTC1ERP+1(3) INTO
+          LS_RESULT_1-/BIC/ZCSTC1ERP.
+          IF LS_RESULT_1-/BIC/ZCSTC1BPC(1) = 'X' OR theXflag = 'X'.
+            CONCATENATE LS_RESULT_1-/BIC/ZCSTC1BPC+1(3) idxC INTO
+            LS_RESULT_1-/BIC/ZCSTC1BPC.
+
+            theXflag = 'X'.
+          ENDIF.
+          APPEND LS_RESULT_1 TO LT_RESULT_1.
+          ADD 1 to idx.
+        ENDWHILE.
+      ELSE.
+        APPEND LS_RESULT_1 TO LT_RESULT_1.
+      ENDIF.
+
+      theXflag = ''.
+
+      CLEAR LT_RESULT_2.
+      LOOP AT LT_RESULT_1 ASSIGNING <RESULT_FIELDS_2>.
+
+        CLEAR LS_RESULT_2.
+        MOVE-CORRESPONDING <RESULT_FIELDS_2> TO LS_RESULT_2.
+
+        IF LS_RESULT_2-/BIC/ZCSTC1ERP+1(1) = 'X'.
+          idx = 0.
+          WHILE idx <= 9.
+            MOVE idx to idxC.
+            CONCATENATE LS_RESULT_2-/BIC/ZCSTC1ERP(1) idxC
+            LS_RESULT_2-/BIC/ZCSTC1ERP+2(2) INTO
+            LS_RESULT_2-/BIC/ZCSTC1ERP.
+            IF LS_RESULT_2-/BIC/ZCSTC1BPC+1(1) = 'X' OR theXflag = 'X'.
+              CONCATENATE LS_RESULT_2-/BIC/ZCSTC1BPC(1) idxC
+              LS_RESULT_2-/BIC/ZCSTC1BPC+2(2) INTO
+              LS_RESULT_2-/BIC/ZCSTC1BPC.
+
+              theXflag = 'X'.
+            ENDIF.
+            APPEND LS_RESULT_2 TO LT_RESULT_2.
+            ADD 1 to idx.
+          ENDWHILE.
+        ELSE.
+          APPEND LS_RESULT_2 TO LT_RESULT_2.
+        ENDIF.
+
+      ENDLOOP.
+
+      theXflag = ''.
+
+      CLEAR LT_RESULT_3.
+      LOOP AT LT_RESULT_2 ASSIGNING <RESULT_FIELDS_3>.
+
+        CLEAR LS_RESULT_3.
+        MOVE-CORRESPONDING <RESULT_FIELDS_3> TO LS_RESULT_3.
+
+        IF LS_RESULT_3-/BIC/ZCSTC1ERP+2(1) = 'X'.
+          idx = 0.
+          WHILE idx <= 9.
+            MOVE idx to idxC.
+            CONCATENATE LS_RESULT_3-/BIC/ZCSTC1ERP(2) idxC
+            LS_RESULT_3-/BIC/ZCSTC1ERP+3(1) INTO
+            LS_RESULT_3-/BIC/ZCSTC1ERP.
+            IF LS_RESULT_3-/BIC/ZCSTC1BPC+2(1) = 'X' OR theXflag = 'X'.
+              CONCATENATE LS_RESULT_3-/BIC/ZCSTC1BPC(2) idxC
+              LS_RESULT_3-/BIC/ZCSTC1BPC+3(1) INTO
+              LS_RESULT_3-/BIC/ZCSTC1BPC.
+
+              theXflag = 'X'.
+            ENDIF.
+            APPEND LS_RESULT_3 TO LT_RESULT_3.
+            ADD 1 to idx.
+          ENDWHILE.
+        ELSE.
+          APPEND LS_RESULT_3 TO LT_RESULT_3.
+        ENDIF.
+
+      ENDLOOP.
+
+      theXflag = ''.
+
+      CLEAR LT_RESULT_4.
+      LOOP AT LT_RESULT_3 ASSIGNING <RESULT_FIELDS_4>.
+
+        CLEAR LS_RESULT_4.
+        MOVE-CORRESPONDING <RESULT_FIELDS_4> TO LS_RESULT_4.
+
+        IF LS_RESULT_4-/BIC/ZCSTC1ERP+3(1) = 'X'.
+          idx = 0.
+          WHILE idx <= 9.
+            MOVE idx to idxC.
+            CONCATENATE LS_RESULT_4-/BIC/ZCSTC1ERP(3) idxC INTO
+            LS_RESULT_4-/BIC/ZCSTC1ERP.
+            IF LS_RESULT_4-/BIC/ZCSTC1BPC+3(1) = 'X' OR theXflag = 'X'.
+              CONCATENATE LS_RESULT_4-/BIC/ZCSTC1BPC(3) idxC INTO
+              LS_RESULT_4-/BIC/ZCSTC1BPC.
+
+              theXflag = 'X'.
+            ENDIF.
+            APPEND LS_RESULT_4 TO LT_RESULT_4.
+            ADD 1 to idx.
+          ENDWHILE.
+        ELSE.
+          APPEND LS_RESULT_4 TO LT_RESULT_4.
+        ENDIF.
+
+      ENDLOOP.
+
+* ERP 2
+
+      theXflag = ''.
+
+      CLEAR LT_RESULT_5.
+      LOOP AT LT_RESULT_4 ASSIGNING <RESULT_FIELDS_5>.
+
+        CLEAR LS_RESULT_5.
+        MOVE-CORRESPONDING <RESULT_FIELDS_5> TO LS_RESULT_5.
+
+        IF LS_RESULT_5-/BIC/ZCSTC2ERP(1) = 'X'.
+          idx = 0.
+          WHILE idx <= 9.
+            MOVE idx to idxC.
+            CONCATENATE idxC LS_RESULT_5-/BIC/ZCSTC2ERP+1(3) INTO
+            LS_RESULT_5-/BIC/ZCSTC2ERP.
+            IF LS_RESULT_5-/BIC/ZCSTC2BPC(1) = 'X' OR theXflag = 'X'.
+              CONCATENATE idxC LS_RESULT_5-/BIC/ZCSTC2BPC+1(3) INTO
+              LS_RESULT_5-/BIC/ZCSTC2BPC.
+
+              theXflag = 'X'.
+            ENDIF.
+            APPEND LS_RESULT_5 TO LT_RESULT_5.
+            ADD 1 to idx.
+          ENDWHILE.
+          ELSE.
+            APPEND LS_RESULT_5 TO LT_RESULT_5.
+          ENDIF.
+
+      ENDLOOP.
+
+      theXflag = ''.
+
+      CLEAR LT_RESULT_6.
+      LOOP AT LT_RESULT_5 ASSIGNING <RESULT_FIELDS_6>.
+
+        CLEAR LS_RESULT_6.
+        MOVE-CORRESPONDING <RESULT_FIELDS_6> TO LS_RESULT_6.
+
+        IF LS_RESULT_6-/BIC/ZCSTC2ERP+1(1) = 'X'.
+          idx = 0.
+          WHILE idx <= 9.
+            MOVE idx to idxC.
+            CONCATENATE LS_RESULT_6-/BIC/ZCSTC2ERP(1) idxC
+            LS_RESULT_6-/BIC/ZCSTC2ERP+2(2) INTO
+            LS_RESULT_6-/BIC/ZCSTC2ERP.
+            IF LS_RESULT_6-/BIC/ZCSTC2BPC+1(1) = 'X' OR theXflag = 'X'.
+              CONCATENATE LS_RESULT_6-/BIC/ZCSTC2BPC(1) idxC
+              LS_RESULT_6-/BIC/ZCSTC2BPC+2(2) INTO
+              LS_RESULT_6-/BIC/ZCSTC2BPC.
+
+              theXflag = 'X'.
+            ENDIF.
+            APPEND LS_RESULT_6 TO LT_RESULT_6.
+            ADD 1 to idx.
+          ENDWHILE.
+        ELSE.
+          APPEND LS_RESULT_6 TO LT_RESULT_6.
+        ENDIF.
+
+      ENDLOOP.
+
+      theXflag = ''.
+
+      CLEAR LT_RESULT_7.
+      LOOP AT LT_RESULT_6 ASSIGNING <RESULT_FIELDS_7>.
+
+        CLEAR LS_RESULT_7.
+        MOVE-CORRESPONDING <RESULT_FIELDS_7> TO LS_RESULT_7.
+
+        IF LS_RESULT_7-/BIC/ZCSTC2ERP+2(1) = 'X'.
+          idx = 0.
+          WHILE idx <= 9.
+            MOVE idx to idxC.
+            CONCATENATE LS_RESULT_7-/BIC/ZCSTC2ERP(2) idxC
+            LS_RESULT_7-/BIC/ZCSTC2ERP+3(1) INTO
+            LS_RESULT_7-/BIC/ZCSTC2ERP.
+            IF LS_RESULT_7-/BIC/ZCSTC2BPC+2(1) = 'X' OR theXflag = 'X'.
+              CONCATENATE LS_RESULT_7-/BIC/ZCSTC2BPC(2) idxC
+              LS_RESULT_7-/BIC/ZCSTC2BPC+3(1) INTO
+              LS_RESULT_7-/BIC/ZCSTC2BPC.
+
+              theXflag = 'X'.
+            ENDIF.
+            APPEND LS_RESULT_7 TO LT_RESULT_7.
+            ADD 1 to idx.
+          ENDWHILE.
+        ELSE.
+          APPEND LS_RESULT_7 TO LT_RESULT_7.
+        ENDIF.
+
+      ENDLOOP.
+
+      theXflag = ''.
+
+      CLEAR LT_RESULT_8.
+      LOOP AT LT_RESULT_7 ASSIGNING <RESULT_FIELDS_8>.
+
+        CLEAR LS_RESULT_8.
+        MOVE-CORRESPONDING <RESULT_FIELDS_8> TO LS_RESULT_8.
+
+        IF LS_RESULT_8-/BIC/ZCSTC2ERP+3(1) = 'X'.
+          idx = 0.
+          WHILE idx <= 9.
+            MOVE idx to idxC.
+            CONCATENATE LS_RESULT_8-/BIC/ZCSTC2ERP(3) idxC INTO
+            LS_RESULT_8-/BIC/ZCSTC2ERP.
+            IF LS_RESULT_8-/BIC/ZCSTC2BPC+3(1) = 'X' OR theXflag = 'X'.
+              CONCATENATE LS_RESULT_8-/BIC/ZCSTC2BPC(3) idxC INTO
+              LS_RESULT_8-/BIC/ZCSTC2BPC.
+
+              theXflag = 'X'.
+            ENDIF.
+            APPEND LS_RESULT_8 TO LT_RESULT_8.
+            ADD 1 to idx.
+          ENDWHILE.
+        ELSE.
+          APPEND LS_RESULT_8 TO LT_RESULT_8.
+        ENDIF.
+
+      ENDLOOP.
+
+      theXflag = ''.
+*
+** МВЗ BPC 1
+*
+*      CLEAR LT_RESULT_9.
+*      LOOP AT LT_RESULT_8 ASSIGNING <RESULT_FIELDS_9>.
+*
+*        CLEAR LS_RESULT_9.
+*        MOVE-CORRESPONDING <RESULT_FIELDS_9> TO LS_RESULT_9.
+*
+*        IF LS_RESULT_9-/BIC/ZCSTC1BPC(1) = 'X'.
+*          idx = 0.
+*          WHILE idx <= 9.
+*            MOVE idx to idxC.
+*            CONCATENATE LS_RESULT_9-/BIC/ZCSTC1BPC+1(3) idxC INTO
+*            LS_RESULT_9-/BIC/ZCSTC1BPC.
+*            APPEND LS_RESULT_9 TO LT_RESULT_9.
+*            ADD 1 to idx.
+*          ENDWHILE.
+*        ELSE.
+*          APPEND LS_RESULT_9 TO LT_RESULT_9.
+*        ENDIF.
+*
+*      ENDLOOP.
+*
+*      CLEAR LT_RESULT_10.
+*      LOOP AT LT_RESULT_9 ASSIGNING <RESULT_FIELDS_10>.
+*
+*        CLEAR LS_RESULT_10.
+*        MOVE-CORRESPONDING <RESULT_FIELDS_10> TO LS_RESULT_10.
+*
+*        IF LS_RESULT_10-/BIC/ZCSTC1BPC+1(1) = 'X'.
+*          idx = 0.
+*          WHILE idx <= 9.
+*            MOVE idx to idxC.
+*            CONCATENATE LS_RESULT_10-/BIC/ZCSTC1BPC(1) idxC
+*            LS_RESULT_10-/BIC/ZCSTC1BPC+2(2) INTO
+*            LS_RESULT_10-/BIC/ZCSTC1BPC.
+*            APPEND LS_RESULT_10 TO LT_RESULT_10.
+*            ADD 1 to idx.
+*          ENDWHILE.
+*        ELSE.
+*          APPEND LS_RESULT_10 TO LT_RESULT_10.
+*        ENDIF.
+*
+*      ENDLOOP.
+*
+*      CLEAR LT_RESULT_11.
+*      LOOP AT LT_RESULT_10 ASSIGNING <RESULT_FIELDS_11>.
+*
+*        CLEAR LS_RESULT_11.
+*        MOVE-CORRESPONDING <RESULT_FIELDS_11> TO LS_RESULT_11.
+*
+*        IF LS_RESULT_11-/BIC/ZCSTC1BPC+2(1) = 'X'.
+*          idx = 0.
+*          WHILE idx <= 9.
+*            MOVE idx to idxC.
+*            CONCATENATE LS_RESULT_11-/BIC/ZCSTC1BPC(2) idxC
+*            LS_RESULT_11-/BIC/ZCSTC1BPC+3(1) INTO
+*            LS_RESULT_11-/BIC/ZCSTC1BPC.
+*            APPEND LS_RESULT_11 TO LT_RESULT_11.
+*            ADD 1 to idx.
+*          ENDWHILE.
+*        ELSE.
+*          APPEND LS_RESULT_11 TO LT_RESULT_11.
+*        ENDIF.
+*
+*      ENDLOOP.
+*
+*      CLEAR LT_RESULT_12.
+*      LOOP AT LT_RESULT_11 ASSIGNING <RESULT_FIELDS_12>.
+*
+*        CLEAR LS_RESULT_12.
+*        MOVE-CORRESPONDING <RESULT_FIELDS_12> TO LS_RESULT_12.
+*
+*        IF LS_RESULT_12-/BIC/ZCSTC1BPC+3(1) = 'X'.
+*          idx = 0.
+*          WHILE idx <= 9.
+*            MOVE idx to idxC.
+*            CONCATENATE LS_RESULT_12-/BIC/ZCSTC1BPC(3) idxC INTO
+*            LS_RESULT_12-/BIC/ZCSTC1BPC.
+*            APPEND LS_RESULT_12 TO LT_RESULT_12.
+*            ADD 1 to idx.
+*          ENDWHILE.
+*        ELSE.
+*          APPEND LS_RESULT_12 TO LT_RESULT_12.
+*        ENDIF.
+*
+*      ENDLOOP.
+*
+** МВЗ BPC 2
+*
+*
+*      CLEAR LT_RESULT_13.
+*      LOOP AT LT_RESULT_12 ASSIGNING <RESULT_FIELDS_13>.
+*
+*        CLEAR LS_RESULT_13.
+*        MOVE-CORRESPONDING <RESULT_FIELDS_13> TO LS_RESULT_13.
+*
+*        IF LS_RESULT_13-/BIC/ZCSTC2BPC(1) = 'X'.
+*          idx = 0.
+*          WHILE idx <= 9.
+*            MOVE idx to idxC.
+*            CONCATENATE idxC LS_RESULT_13-/BIC/ZCSTC2BPC+1(3) INTO
+*            LS_RESULT_13-/BIC/ZCSTC2BPC.
+*            APPEND LS_RESULT_13 TO LT_RESULT_13.
+*            ADD 1 to idx.
+*          ENDWHILE.
+*          ELSE.
+*            APPEND LS_RESULT_13 TO LT_RESULT_13.
+*          ENDIF.
+*
+*      ENDLOOP.
+*
+*      CLEAR LT_RESULT_14.
+*      LOOP AT LT_RESULT_13 ASSIGNING <RESULT_FIELDS_14>.
+*
+*        CLEAR LS_RESULT_14.
+*        MOVE-CORRESPONDING <RESULT_FIELDS_14> TO LS_RESULT_14.
+*
+*        IF LS_RESULT_14-/BIC/ZCSTC2BPC+1(1) = 'X'.
+*          idx = 0.
+*          WHILE idx <= 9.
+*            MOVE idx to idxC.
+*            CONCATENATE LS_RESULT_14-/BIC/ZCSTC2BPC(1) idxC
+*            LS_RESULT_14-/BIC/ZCSTC2BPC+2(2) INTO
+*            LS_RESULT_14-/BIC/ZCSTC2BPC.
+*            APPEND LS_RESULT_14 TO LT_RESULT_14.
+*            ADD 1 to idx.
+*          ENDWHILE.
+*        ELSE.
+*          APPEND LS_RESULT_14 TO LT_RESULT_14.
+*        ENDIF.
+*
+*      ENDLOOP.
+*
+*      CLEAR LT_RESULT_15.
+*      LOOP AT LT_RESULT_14 ASSIGNING <RESULT_FIELDS_15>.
+*
+*        CLEAR LS_RESULT_15.
+*        MOVE-CORRESPONDING <RESULT_FIELDS_15> TO LS_RESULT_15.
+*
+*        IF LS_RESULT_15-/BIC/ZCSTC2BPC+2(1) = 'X'.
+*          idx = 0.
+*          WHILE idx <= 9.
+*            MOVE idx to idxC.
+*            CONCATENATE LS_RESULT_15-/BIC/ZCSTC2BPC(2) idxC
+*            LS_RESULT_15-/BIC/ZCSTC2BPC+3(1) INTO
+*            LS_RESULT_15-/BIC/ZCSTC2BPC.
+*            APPEND LS_RESULT_15 TO LT_RESULT_15.
+*            ADD 1 to idx.
+*          ENDWHILE.
+*        ELSE.
+*          APPEND LS_RESULT_15 TO LT_RESULT_15.
+*        ENDIF.
+*
+*      ENDLOOP.
+*
+*      CLEAR LT_RESULT_16.
+*      LOOP AT LT_RESULT_15 ASSIGNING <RESULT_FIELDS_16>.
+*
+*        CLEAR LS_RESULT_16.
+*        MOVE-CORRESPONDING <RESULT_FIELDS_16> TO LS_RESULT_16.
+*
+*        IF LS_RESULT_16-/BIC/ZCSTC2BPC+3(1) = 'X'.
+*          idx = 0.
+*          WHILE idx <= 9.
+*            MOVE idx to idxC.
+*            CONCATENATE LS_RESULT_16-/BIC/ZCSTC2BPC(3) idxC INTO
+*            LS_RESULT_16-/BIC/ZCSTC2BPC.
+*            APPEND LS_RESULT_16 TO LT_RESULT_16.
+*            ADD 1 to idx.
+*          ENDWHILE.
+*        ELSE.
+*          APPEND LS_RESULT_16 TO LT_RESULT_16.
+*        ENDIF.
+*
+*      ENDLOOP.
+*
+*
+
+* END
+
+      LOOP AT LT_RESULT_8 ASSIGNING <RESULT_FIELDS_9_2>.
+
+        CLEAR LS_RESULT_9_2.
+        MOVE-CORRESPONDING <RESULT_FIELDS_9_2> TO LS_RESULT_9_2.
+
+        CONCATENATE LS_RESULT_9_2-/BIC/ZCSTC1ERP '.'
+        LS_RESULT_9_2-/BIC/ZCSTC2ERP INTO
+        LS_RESULT_9_2-/BIC/ZCSTCNTP1.
+        CONCATENATE LS_RESULT_9_2-/BIC/ZCSTC1BPC '.'
+        LS_RESULT_9_2-/BIC/ZCSTC2BPC INTO
+        LS_RESULT_9_2-/BIC/ZCSTCNTP2.
+        APPEND LS_RESULT_9_2 TO LT_RESULT_9_2.
+
+      ENDLOOP.
+
+    ENDLOOP.
+
+    CLEAR RESULT_PACKAGE.
+
+    APPEND LINES OF LT_RESULT_9_2 TO RESULT_PACKAGE.
+
+
+*$*$ end of routine - insert your code only before this line         *-*
+  ENDMETHOD.                    "end_routine
+*----------------------------------------------------------------------*
+*       Inverse method inverse_end_routine
+*----------------------------------------------------------------------*
+*       This subroutine needs to be implemented only for direct access
+*       (for better performance) and for the Report/Report Interface
+*       (drill through).
+*       The inverse routine should transform a projection and
+*       a selection for the target to a projection and a selection
+*       for the source, respectively.
+*       If the implementation remains empty all fields are filled and
+*       all values are selected.
+*----------------------------------------------------------------------*
+*       Customer comment:
+*----------------------------------------------------------------------*
+  METHOD inverse_end_routine.
+
+*   IMPORTING
+*     i_r_selset_outbound          TYPE REF TO cl_rsmds_set
+*     i_th_fields_outbound         TYPE HASHED TABLE
+*     i_r_selset_outbound_complete TYPE REF TO cl_rsmds_set
+*     i_r_universe_inbound         TYPE REF TO cl_rsmds_universe
+*   CHANGING
+*     c_r_selset_inbound           TYPE REF TO cl_rsmds_set
+*     c_th_fields_inbound          TYPE HASHED TABLE
+*     c_exact                      TYPE rs_bool
+
+*$*$ begin of inverse routine - insert your code only below this line*-*
+... "insert your code here
+*$*$ end of inverse routine - insert your code only before this line *-*
+
+  ENDMETHOD.                    "inverse_end_routine
+
+  METHOD new_record__end_routine.
+
+***** IMPLEMENTATION  is only visible in generated program *****
+
+  ENDMETHOD.
+ENDCLASS.                    "routine IMPLEMENTATION
